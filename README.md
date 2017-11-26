@@ -2,13 +2,14 @@ The project override some class in maven-scm-provider-gitexe runtime, so to supp
 
 1. On each pom.xml (including all child and parent projects)
 define the scm connection to prevent url realignment
+```
 	<scm>
 		<url>https://github.com/alfredyctan/afc-maven</url>
 		<connection>scm:git:https://github.com/alfredyctan/afc-maven.git</connection>
 		<developerConnection>scm:git:https://github.com/alfredyctan/afc-maven.git</developerConnection>
   	<tag>HEAD</tag>
 	</scm>
-
+```
 2. add additional dependency in the maven-release-plugin
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
