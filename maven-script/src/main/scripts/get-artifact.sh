@@ -2,7 +2,7 @@
 
 usage()	{
 	echo "missing $1"
-	echo "Usage: $0	-r <repo-url> -g <group-id> -a <artifact-id> [-c classifier] [-t type] [-u <username> -p <password>] [-o output directory] [-q:quiet mode]"
+	echo "Usage: $0 -r <repo-url> -g <group-id> -a <artifact-id> [-c classifier] [-t type] [-u <username> -p <password>] [-o output directory] [-q:quiet mode]"
 	exit 1
 }
 
