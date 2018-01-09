@@ -1,16 +1,26 @@
-#!/bin/sh
+#!/bin/bash
+
+exit_on_error() {
+	if [ "$1" -ne "0" ] ; then
+		echo "$2"
+		exit $1
+	fi
+}
 
 usage()	{
 	echo "missing $1"
-	echo "Usage: $0 -r <repo-url> -g <group-id> -a <artifact-id> [-c classifier] [-t type] [-u <username> -p <password>] [-o output directory] [-q:quiet mode]"
+	echo "Usage: $0 -r <repo-url> -g <group-id> -a <artifact-id> [-s <snapshot-repo-url>] [-c <classifier>] [-t type] [-u <username> -p <password>] [-o <output-directory>] [-q:quiet mode]"
 	exit 1
 }
 
-while getopts "r:u:p:g:a:c:t:v:o:q" OPT;
+while getopts "r:s:u:p:g:a:c:t:v:o:q" OPT;
 do
 	case $OPT in
 	r)
 		REPO_URL=$OPTARG
+		;;
+	s)
+		SNAPSHOT_REPO_URL=$OPTARG
 		;;
 	u)
 		USERNAME="--http-user ${OPTARG}"
@@ -41,7 +51,7 @@ do
 		QUIET="-q"
 		;;
 	*)
-		echo "Usage: $0 -r <repo-url> -g <group-id>	-a <release|latest|artifact-id> [-u <username>	-p <password>]"
+		usage
 		exit 1
 		;;
 	esac
@@ -52,6 +62,7 @@ shift $((OPTIND-1))
 [ -z $GROUP_ID ] && usage "group-id"
 [ -z $ARTIFACT_ID ] && usage "artifact-id"
 [ -z $VERSION ]	&& usage "version"
+OUTPUT=${OUTPUT:-"."}
 
 WGET_OPTS="--no-check-certificate ${QUIET}"
 
@@ -61,12 +72,19 @@ GROUP_ID_PATH=`echo $GROUP_ID |	sed "s/\./\//g"`
 METADATA_URL="$REPO_URL/$GROUP_ID_PATH/$ARTIFACT_ID/maven-metadata.xml"
 METADATA=`mktemp maven-metadata.xml.XXXXXX`
 wget $WGET_OPTS	-O $METADATA $METADATA_URL
+
 case $VERSION in
 	release)
 		ARTIFACT_VERSION=`grep -e "<release>.*<\/release>" $METADATA | sed "s/^.*<release>//g" | sed "s/<\\/release>.*$//g"`
 		;;
 	latest)
-		ARTIFACT_VERSION=`grep -e "<latest>.*<\/latest>" $METADATA | sed "s/^.*<latest>//g" | sed "s/<\\/latest>.*$//g"`
+		if [ -n "$SNAPSHOT_REPO_URL" ]; then
+			SNAPSHOT_METADATA_URL="$SNAPSHOT_REPO_URL/$GROUP_ID_PATH/$ARTIFACT_ID/maven-metadata.xml"
+			SNAPSHOT_METADATA=`mktemp maven-metadata.xml.XXXXXX`
+			wget $WGET_OPTS	-O $SNAPSHOT_METADATA $SNAPSHOT_METADATA_URL
+		fi
+		ARTIFACT_VERSION=`grep -e "<version>.*<\/version>" $METADATA $SNAPSHOT_METADATA | sed "s/^.*<version>//g" | sed "s/<\\/version>.*$//g" | sort -V | tail -1`
+		rm -f $SNAPSHOT_METADATA
 		;;
 	*)
 		ARTIFACT_VERSION=$VERSION
@@ -76,17 +94,25 @@ rm $METADATA
 
 #resolve artifact file version
 if [[ $ARTIFACT_VERSION	=~ "-SNAPSHOT" ]]; then
-	SNAPSHOT_METADATA_URL="$REPO_URL/$GROUP_ID_PATH/$ARTIFACT_ID/$ARTIFACT_VERSION/maven-metadata.xml"
+	if [ -n "$SNAPSHOT_REPO_URL" ]; then
+		ARTIFACT_REPO_URL=$SNAPSHOT_REPO_URL
+	else
+		ARTIFACT_REPO_URL=$REPO_URL
+	fi
+	SNAPSHOT_METADATA_URL="$ARTIFACT_REPO_URL/$GROUP_ID_PATH/$ARTIFACT_ID/$ARTIFACT_VERSION/maven-metadata.xml"
 	SNAPSHOT_METADATA=`mktemp maven-metadata.xml.XXXXXX`
 	wget $WGET_OPTS	-O $SNAPSHOT_METADATA $SNAPSHOT_METADATA_URL
-	FILE_VERSION=`grep -e "<value>.*</value>" $SNAPSHOT_METADATA | tail -n 1 | sed "s/^.*<value>//g" | sed "s/<\\/value>//g"`
+	FILE_VERSION=`grep -e "<value>.*</value>" $SNAPSHOT_METADATA | sed "s/^.*<value>//g" | sed "s/<\\/value>//g" | tail -1`
 else
+	ARTIFACT_REPO_URL=$REPO_URL
 	FILE_VERSION=$ARTIFACT_VERSION
 fi
 rm -f $SNAPSHOT_METADATA
 
-ARTIFACT_URL="$REPO_URL/$GROUP_ID_PATH/$ARTIFACT_ID/$ARTIFACT_VERSION/$ARTIFACT_ID-${FILE_VERSION}${CLASSIFIER}.$TYPE"
-[ -n $OUTPUT ] && mkdir -p $OUTPUT
+
+ARTIFACT_URL="$ARTIFACT_REPO_URL/$GROUP_ID_PATH/$ARTIFACT_ID/$ARTIFACT_VERSION/$ARTIFACT_ID-${FILE_VERSION}${CLASSIFIER}.$TYPE"
+
+mkdir -p $OUTPUT
 wget $WGET_OPTS	$USERNAME $PASSWORD $OUTPUT_OPT $ARTIFACT_URL
 
 if [ ! -f "${OUTPUT}/$ARTIFACT_ID-${FILE_VERSION}${CLASSIFIER}.$TYPE" ]; then
@@ -94,3 +120,6 @@ if [ ! -f "${OUTPUT}/$ARTIFACT_ID-${FILE_VERSION}${CLASSIFIER}.$TYPE" ]; then
 	usage "type or classifier?"
 fi
 
+if [ "$FILE_VERSION" != "$ARTIFACT_VERSION" ]; then
+	mv ${OUTPUT}/$ARTIFACT_ID-${FILE_VERSION}${CLASSIFIER}.$TYPE ${OUTPUT}/$ARTIFACT_ID-${ARTIFACT_VERSION}${CLASSIFIER}.$TYPE 
+fi
